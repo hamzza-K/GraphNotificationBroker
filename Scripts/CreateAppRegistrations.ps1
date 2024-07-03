@@ -10,26 +10,22 @@ param (
     [string[]] $WebRedirectUris,
     [string[]] $CorsUrls
 )
-try
-{
+try {
     $FuncAppRedirectUri = "https://$($ApplicationName)func.azurewebsites.net"
     $SpaRedirectUris += $FuncAppRedirectUri
-
     $CorsUrls += $FuncAppRedirectUri
 
     Write-Host "Connecting to Graph"
-    if ($token) {
-        $c = Connect-MgGraph -AccessToken $token
-    }
-    else {
-        # If running as a user not in a container you can use this command
-        $c = Connect-MgGraph -Scopes "Application.ReadWrite.All", "User.ReadBasic.All"
+    if ($AccessToken) {
+        $secureToken = ConvertTo-SecureString -String $AccessToken -AsPlainText -Force
+        Connect-MgGraph -AccessToken $secureToken
+    } else {
+        Connect-MgGraph -Scopes "Application.ReadWrite.All", "User.ReadBasic.All"
     }
 
     $frontendApplication = Get-MgApplication -Filter "DisplayName eq '$($ApplicationName) Frontend'"
     if (!$frontendApplication) {
         Write-Warning -Message "Creating Frontend Application: $($ApplicationName) Frontend"
-        # Create Frontend Application
         $frontendApplicationParams = @{
             DisplayName = $ApplicationName + " Frontend"
             Spa = @{
@@ -41,107 +37,108 @@ try
             SignInAudience = "AzureADMultipleOrgs"
         }
         $frontendApplication = New-MgApplication @frontendApplicationParams
+    } else {
+        Write-Host "Frontend Application already exists: $($frontendApplication.DisplayName)"
     }
 
     $backendApplication = Get-MgApplication -Filter "DisplayName eq '$($ApplicationName) Backend'"
     if (!$backendApplication) {
-        Write-Warning -Message "Creating Frontend Application: $($ApplicationName) Backend"
-        # Create backnd application
+        Write-Warning -Message "Creating Backend Application: $($ApplicationName) Backend"
         $backendApplicationParams = @{
             DisplayName = $ApplicationName + " Backend"
             SignInAudience = "AzureADMultipleOrgs"
-            RequiredResourceAccess = @{
-                ResourceAppId = "00000003-0000-0000-c000-000000000000" # MS Graph
-                ResourceAccess = @(
-                    @{
-                        Id = "f501c180-9344-439a-bca0-6cbf209fd270" # Chat.Read
-                        Type = "Scope"
-                    }
-                )
-            }
+            RequiredResourceAccess = @(
+                @{
+                    ResourceAppId = "00000003-0000-0000-c000-000000000000" # MS Graph
+                    ResourceAccess = @(
+                        @{
+                            Id = "f501c180-9344-439a-bca0-6cbf209fd270" # Chat.Read
+                            Type = "Scope"
+                        }
+                    )
+                }
+            )
         }
         $backendApplication = New-MgApplication @backendApplicationParams
 
         Write-Warning -Message "Adding Microsoft Graph Permissions to: $($ApplicationName) Backend"
-        # Update backend application with Id needed
-        # after inital creation
-        $scopeId = New-Guid
+        $scopeId = [Guid]::NewGuid()
         $backendScopeParams = @{
-            IdentifierUris = @(
-                "api://" + $backendApplication.AppId
-            )
+            IdentifierUris = @("api://" + $backendApplication.AppId)
             Api = @{
-                KnownClientApplications = @(
-                    $frontendApplication.AppId
-                )
+                KnownClientApplications = @($frontendApplication.AppId)
                 Oauth2PermissionScopes = @(
                     @{ 
-                        Id = $scopeId; 
-                        AdminConsentDescription = "Allows the app to read all 1-to-1 or group chat messages in Microsoft Teams.";
-                        AdminConsentDisplayName = "Read all chat messages";
-                        UserConsentDescription = "Allows an app to read 1 on 1 or group chats threads, on behalf of the signed-in user.";
-                        UserConsentDisplayName = "Read user chat messages";
-                        Value = "Chat.Read";
-                        IsEnabled = $true;
+                        Id = $scopeId
+                        AdminConsentDescription = "Allows the app to read all 1-to-1 or group chat messages in Microsoft Teams."
+                        AdminConsentDisplayName = "Read all chat messages"
+                        UserConsentDescription = "Allows an app to read 1 on 1 or group chats threads, on behalf of the signed-in user."
+                        UserConsentDisplayName = "Read user chat messages"
+                        Value = "Chat.Read"
+                        IsEnabled = $true
                         Type = "User"
                     }
                 )
             }
         }
         Update-MgApplication -ApplicationId $backendApplication.Id @backendScopeParams
+    } else {
+        Write-Host "Backend Application already exists: $($backendApplication.DisplayName)"
+        # Generate scopeId if not generating new
+        $scopeId = [Guid]::NewGuid()
     }
 
-    if ($frontendApplication.RequiredResourceAccess.ResourceAppId -ne $backendApplication.AppId) {
-        Write-Warning -Message "Adding $($ApplicationName) Backend api scope to $($ApplicationName) Frontend"
-        # Update frontend application with backend app scope
+    if ($null -eq $frontendApplication.RequiredResourceAccess -or $frontendApplication.RequiredResourceAccess.ResourceAppId -ne $backendApplication.AppId) {
+        Write-Warning -Message "Adding $($ApplicationName) Backend API scope to $($ApplicationName) Frontend"
         $frontendScopesParams = @{
-            RequiredResourceAccess = @{
-                ResourceAppId = $backendApplication.AppId
-                ResourceAccess = @(
-                    @{
-                        Id = $scopeId
-                        Type = "Scope"
-                    }
-                )
-            }
+            RequiredResourceAccess = @(
+                @{
+                    ResourceAppId = $backendApplication.AppId
+                    ResourceAccess = @(
+                        @{
+                            Id = $scopeId
+                            Type = "Scope"
+                        }
+                    )
+                }
+            )
         }
         Update-MgApplication -ApplicationId $frontendApplication.Id @frontendScopesParams
     }
 
     Write-Warning -Message "Creating new client secret for: $($ApplicationName) Backend"
-    # Even if the App exists, we need to create a new secret
-    # Create secret for backend application
     $backendSecretParams = @{
         PasswordCredential = @{
-            DisplayName = New-Guid
+            DisplayName = [Guid]::NewGuid().ToString()
         }
     }
     $backendSecret = Add-MgApplicationPassword -ApplicationId $backendApplication.Id @backendSecretParams
 
-    # Get Graph Change Tracking SP Id
     $graphChangeTrackingSp = Get-MgServicePrincipal -Filter "AppId eq '0bf30f3b-4a52-48df-9a82-234910c4a086'"
-
-    # Get current User Oid
     $context = Get-MgContext
-    $user = Get-MgUser -Filter "UserPrincipalName eq '$($context.Account)'"
+
+    # Extracting current user UPN from context and getting user object
+    # $userUpn = $context.Account
+    # $user = Get-MgUser -UserPrincipalName $userUpn
 
     $paramsOutput = @{
-        '$schema'= 'https=//schema.management.azure.com/schemas/2019-04-01/deploymentParameters.json#'
-        'contentVersion'= '1.0.0.0'
-        'parameters'= @{
-            'appName'= @{
+        '$schema' = 'https=//schema.management.azure.com/schemas/2019-04-01/deploymentParameters.json#'
+        'contentVersion' = '1.0.0.0'
+        'parameters' = @{
+            'appName' = @{
                 'value' = $ApplicationName
             }
-            'graphChangeTrackingSpId'= @{
+            'graphChangeTrackingSpId' = @{
                 'value' = $graphChangeTrackingSp.Id
             }
-            'userId'= @{
-                'value' = $user.Id
+            'userId' = @{
+                # 'value' = $user.Id
+                'value' = '00f28cbd-f80d-4395-982c-7edd8d2e06e7'
             }
-            'apiClientId'= @{
+            'apiClientId' = @{
                 'value' = $backendApplication.AppId
             }
-            'apiClientSecret'= @{
+            'apiClientSecret' = @{
                 'value' = $backendSecret.SecretText
             }
             'corsUrls' = @{
@@ -154,7 +151,7 @@ try
 
     Write-Host "Frontend ClientId: " $frontendApplication.AppId
     Write-Host "Backend ClientId: " $backendApplication.AppId
-    Write-Host "Microsft Graph Change Tracking Service Principal Id: " $graphChangeTrackingSp.Id
+    Write-Host "Microsoft Graph Change Tracking Service Principal Id: " $graphChangeTrackingSp.Id
     Write-Host "User Account Id: " $user.Id
 
     return [PSCustomObject]@{
@@ -163,8 +160,8 @@ try
         RedirectUri = $FuncAppRedirectUri
     }
 }
-catch
-{
+catch {
     Write-Warning $_
     Write-Warning $_.exception
 }
+

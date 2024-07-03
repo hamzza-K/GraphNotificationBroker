@@ -60,7 +60,14 @@ try
             -Verbose
 
         # Set the client ids in the test client
-        $output | ./Scripts/SetTestClientConfig.ps1
+        $frontendClientId = $output.FrontendClientId
+        $backendClientId = $output.BackendClientId
+        $redirectUri = $output.RedirectUri
+
+        $output | ./Scripts/SetTestClientConfig.ps1 `
+            -FrontendClientId $frontendClientId `
+            -BackendClientId $backendClientId `
+            -RedirectUri $redirectUri`
 
         if (!(Get-AzResourceGroup -Name $ResourceGroupName -ErrorAction SilentlyContinue)) {
             New-AzResourceGroup -Name $ResourceGroupName -Location $Location -ErrorAction stop
@@ -82,6 +89,6 @@ try
 catch {
     Write-Warning $_
     Write-Warning $_.exception
-    Write-Warning -Message "Logging Out user"
-    Logout-AzAccount
+    Write-Warning -Message "Not Logging Out user"
+    # Logout-AzAccount
 }
