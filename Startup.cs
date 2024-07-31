@@ -2,8 +2,8 @@ using GraphNotifications.Services;
 using Microsoft.Azure.Functions.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Configuration;
-using GraphNotifications.Models;
 using Microsoft.Extensions.Logging;
+using GraphNotifications.Models;
 
 [assembly: FunctionsStartup(typeof(GraphNotifications.Startup))]
 
@@ -14,7 +14,6 @@ namespace GraphNotifications
         public override void Configure(IFunctionsHostBuilder builder)
         {
             // set min threads to reduce chance for Redis timeoutes
-            // https://docs.microsoft.com/en-us/azure/azure-cache-for-redis/cache-troubleshoot-client#traffic-burst
             ThreadPool.SetMinThreads(200, 200);
             
             builder.Services.AddOptions<AppSettings>()
@@ -36,6 +35,14 @@ namespace GraphNotifications
                 new CacheService(
                     x.GetRequiredService<IRedisFactory>(),
                     x.GetRequiredService<ILogger<CacheService>>()));
+            
+            // Configure logging
+            builder.Services.AddLogging(loggingBuilder =>
+            {
+                loggingBuilder.AddConsole();
+                loggingBuilder.AddDebug();
+                loggingBuilder.SetMinimumLevel(LogLevel.Information); // Adjust to Information or Debug
+            });
         }
     }
 }

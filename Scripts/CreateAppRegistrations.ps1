@@ -115,11 +115,11 @@ try {
     $backendSecret = Add-MgApplicationPassword -ApplicationId $backendApplication.Id @backendSecretParams
 
     $graphChangeTrackingSp = Get-MgServicePrincipal -Filter "AppId eq '0bf30f3b-4a52-48df-9a82-234910c4a086'"
-    $context = Get-MgContext
+    # $context = Get-MgContext
 
     # Extracting current user UPN from context and getting user object
     # $userUpn = $context.Account
-    # $user = Get-MgUser -UserPrincipalName $userUpn
+    $user = Get-MgUser
 
     $paramsOutput = @{
         '$schema' = 'https=//schema.management.azure.com/schemas/2019-04-01/deploymentParameters.json#'
@@ -132,8 +132,8 @@ try {
                 'value' = $graphChangeTrackingSp.Id
             }
             'userId' = @{
-                # 'value' = $user.Id
-                'value' = '00f28cbd-f80d-4395-982c-7edd8d2e06e7'
+                'value' = $user.Id
+                # 'value' = '00f28cbd-f80d-4395-982c-7edd8d2e06e7'
             }
             'apiClientId' = @{
                 'value' = $backendApplication.AppId

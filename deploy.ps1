@@ -64,7 +64,7 @@ try
         $backendClientId = $output.BackendClientId
         $redirectUri = $output.RedirectUri
 
-        $output | ./Scripts/SetTestClientConfig.ps1 `
+        ./Scripts/SetTestClientConfig.ps1 `
             -FrontendClientId $frontendClientId `
             -BackendClientId $backendClientId `
             -RedirectUri $redirectUri`
